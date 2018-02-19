@@ -1,10 +1,7 @@
 package com.a1s.spark;
 
 import org.apache.spark.api.java.function.FilterFunction;
-import org.apache.spark.api.java.function.Function;
 import org.apache.spark.SparkConf;
-import org.apache.spark.api.java.JavaRDD;
-import org.apache.spark.api.java.JavaSparkContext;
 import org.apache.spark.sql.*;
 import org.apache.spark.sql.types.DataTypes;
 import org.apache.spark.sql.types.Metadata;
@@ -17,11 +14,9 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.Serializable;
-import java.sql.Timestamp;
 import java.util.Date;
 
 import static org.apache.spark.sql.functions.col;
-import static org.apache.spark.sql.functions.count;
 
 //https://github.com/apache/spark/tree/master/examples/src/main/java/org/apache/spark/examples
 
@@ -48,9 +43,14 @@ public class Application {
 
     public static void main(String args[]) {
 
+        calc();
+    }
+
+    public static void calc() {
+
         SparkConf sparkConf = new SparkConf().
                 setAppName("SOME APP NAME").
-                setMaster("local[2]").
+                setMaster("local[50]").
                 set("spark.driver.maxResultSize", "8g").
                 set("spark.driver.memory", "8g").
                 set("spark.executor.memory", "8g");
@@ -85,124 +85,101 @@ public class Application {
                     new StructField("a9", DataTypes.StringType, true, Metadata.empty()),
                 });
 
-        String file = "dataset/with_a_numbers_2018_02_16.csv";
+        String folder = "dataset/";
+        String file = "full_export_02-12-2018.csv";
 
         Dataset<Row> ds = context.read().
-                format("csv").
-                option("header", "false").
-                option("footer", "false").
-                option("mode", "FAILFAST").
-                option("delimiter", ",").
-                schema(schema).
-                load(file);
+            format("csv").
+            option("header", "false").
+            option("footer", "false").
+            option("mode", "FAILFAST").
+            option("delimiter", ",").
+            schema(schema).
+            load(folder + file).
+            filter(row -> row.getAs("aNumber") != null).
+            orderBy("aNumber").
+            alias("ds");
 
-        ds.
-                groupBy(ds.col("aNumber")).
-                agg(count(ds.col("aNumber")).as("outgoingCalls")).
-                select(col("aNumber").as("aNumberAlias")).
-                show();
+        log.info("### total={}", ds.count());
 
-        log.info("####={}", ds.take(1));
-
-        DateTime period90Start = new DateTime().minusMonths(1);
-        DateTime period90End = new DateTime().minusMonths(3);
+        DateTime period90Start = new DateTime().minusMonths(4);
+        DateTime period90End = new DateTime().minusMonths(1);
 
         Dataset<Row> outgoingCalls90 = ds.
                 filter("component like '%InitialDP%'").
-                filter(new FilterFunction<Row>() {
-            @Override
-            public boolean call(Row row) throws Exception {
-                return ((Date)row.getAs("date_")).compareTo(period90Start.toDate()) < 0 &&
-                        ((Date)row.getAs("date_")).compareTo(period90End.toDate()) > 0;
-            }
-        });
+                filter((FilterFunction<Row>) row ->
+                        ((Date)row.getAs("date_")).compareTo(period90Start.toDate()) > 0 &&
+                            ((Date)row.getAs("date_")).compareTo(period90End.toDate()) < 0);
 
+        outgoingCalls90.show();
         log.info("### 90 days count={}", outgoingCalls90.count());
 
-        DateTime period60End = new DateTime().minusMonths(2);
-
+        DateTime period60End = new DateTime().minusMonths(3);
         Dataset<Row> outgoingCalls60 = outgoingCalls90.
-                filter("component like '%InitialDP%'").
-                filter(new FilterFunction<Row>() {
-            @Override
-            public boolean call(Row row) throws Exception {
-                return ((Date)row.getAs("date_")).compareTo(period60End.toDate()) > 0;
-            }
-        });
+                filter((FilterFunction<Row>) row ->
+                        ((Date)row.getAs("date_")).compareTo(period60End.toDate()) > 0).
+                alias("outgoingCalls60");
 
+        outgoingCalls60.show();
         log.info("### 60 days count={}", outgoingCalls60.count());
 
-        DateTime period30End = new DateTime().minusMonths(1);
-
+        DateTime period30End = new DateTime().minusMonths(2);
         Dataset<Row> outgoingCalls30 = outgoingCalls60.
-                filter("component like '%InitialDP%'").
-                filter(new FilterFunction<Row>() {
-            @Override
-            public boolean call(Row row) throws Exception {
-                return ((Date)row.getAs("date_")).compareTo(period30End.toDate()) > 0;
-            }
-        });
+                filter((FilterFunction<Row>) row ->
+                        ((Date)row.getAs("date_")).compareTo(period30End.toDate()) > 0).
+                alias("outgoingCalls30");
 
+        DateTime lastMonthEnd = new DateTime().minusMonths(1);
+        Dataset<Row> lastMonth = ds.
+                filter((FilterFunction<Row>) row ->
+                        ((Date)row.getAs("date_")).compareTo(lastMonthEnd.toDate()) > 0).
+                alias("lastMonth");
+
+        outgoingCalls30.show();
         log.info("### 30 days count={}", outgoingCalls30.count());
 
-        Dataset<Row> result = ds.
-                select("aNumber").
-                distinct().
-                filter("aNumber != null").
-                join(
-                        outgoingCalls30.
-                                groupBy(ds.col("aNumber")).
-                                agg(count(ds.col("aNumber")).as("outgoingCalls30")).
-                                select(col("aNumber").as("outgoingCalls30_aNumber"), col("outgoingCalls30")),
-                        col("aNumber").equalTo(col("outgoingCalls30_aNumber")),
-                        "right_outer"
-                ).
-                join(
-                        outgoingCalls60.
-                                groupBy(ds.col("aNumber")).
-                                agg(count(outgoingCalls60.col("aNumber")).as("outgoingCalls60")).
-                                select(col("aNumber").as("outgoingCalls60_aNumber"), col("outgoingCalls60")),
-                        col("outgoingCalls60_aNumber").equalTo(col("aNumber")),
-                        "right_outer"
-                ).
-                join(
-                        outgoingCalls90.
-                                groupBy(ds.col("aNumber")).
-                                agg(count(outgoingCalls90.col("aNumber")).as("outgoingCalls90")).
-                                select(col("aNumber").as("outgoingCalls90_aNumber"), col("outgoingCalls90")),
-                        col("outgoingCalls90_aNumber").equalTo(col("aNumber")),
-                        "right_outer"
-                );
+        Dataset<Row> result = ds.select("aNumber").distinct().
 
-        log.info("### total={}", result.count());
+                join(
+                        outgoingCalls30.groupBy("aNumber").count().as("outgoing_calls_30"),
+                        col("outgoingCalls30.aNumber").equalTo(col("ds.aNumber")),
+                        "leftouter"
+                ).
+
+                join(
+                        outgoingCalls30.groupBy("aNumber").count().as("outgoing_calls_30_upd"),
+                        col("outgoingCalls30.aNumber").equalTo(col("ds.aNumber")),
+                        "leftouter"
+                ).
+                join(
+                        outgoingCalls60.groupBy("aNumber").count().as("outgoing_calls_60_upd"),
+                        col("outgoingCalls60.aNumber").equalTo(col("ds.aNumber")),
+                        "leftouter"
+                ).
+                join(
+                        outgoingCalls90.groupBy("aNumber").count().as("outgoing_calls_90_upd"),
+                        col("outgoingCalls90.aNumber").equalTo(col("ds.aNumber")),
+                        "leftouter"
+                ).
+                select(
+                        col("ds.aNumber"),
+                        col("outgoingCalls30.count").as("outgoing_calls_30"),
+                        col("outgoingCalls30.count").as("outgoing_calls_30_upd"),
+                        col("outgoingCalls60.count").as("outgoing_calls_60_upd"),
+                        col("outgoingCalls90.count").as("outgoing_calls_90_upd")
+                );
 
         result.show();
 
-//                = context.sql(
-//                "SELECT * " +
-//                "FROM raw " +
-//                "WHERE date_ < cast('" + cals30Start.toString("yyyy-MM-dd") + "' as date) AND " +
-//                    "date_  > cast('" + cals30End.toString("yyyy-MM-dd") + "' as date)");
-//
-//        log.info("###={}", calls30.count());
+        log.info("####={}", result.count());
 
-//        calls30.createOrReplaceTempView("calls30");
-//
-//        Dataset<Row> dataset = context.sql(
-//                "SELECT A.aNumber, B.amount " +
-//                "FROM (SELECT DISTINCT aNumber FROM raw) A " +
-//                "LEFT OUTER JOIN " +
-//                        "(SELECT aNumber, count(*) amount " +
-//                        "FROM calls30 " +
-//                        "WHERE " +
-//                            "component LIKE 'InitialDP%' " +
-//                        "GROUP BY aNumber) B " +
-//                        "ON B.aNumber = A.aNumber " +
-//                "WHERE B.amount is not null");
-//
-//        dataset.show();
-//
-//        log.info("###={}", dataset.count());
+        result.
+                repartition(1).
+                write().
+                format("com.databricks.spark.csv").
+                option("header", "true").
+                option("delimiter", ",").
+                save("done/" + file.replace(".csv", "_done") + ".csv");
 
         spark.stop();
     }

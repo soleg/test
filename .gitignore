@@ -1,4 +1,5 @@
 .idea
 target
 
-dataset/export.csv
+dataset/*
+done/*
