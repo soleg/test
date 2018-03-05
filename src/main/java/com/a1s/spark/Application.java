@@ -13,8 +13,12 @@ import org.joda.time.format.DateTimeFormatter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.FileInputStream;
 import java.io.Serializable;
 import java.util.Date;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.Properties;
 
 import static org.apache.spark.sql.functions.col;
 
@@ -41,19 +45,23 @@ public class Application {
 
     private static final Logger log = LoggerFactory.getLogger(Application.class);
 
-    public static void main(String args[]) {
+    public static void main(String args[]) throws Exception {
 
         calc();
     }
 
-    public static void calc() {
+    public static void calc() throws Exception {
+//
+//        String path = Thread.currentThread().getContextClassLoader().getResource("").getPath();
+//
+//        Properties properties = new Properties();
+//        properties.load(new FileInputStream(path + "/default.properties"));
+
+//        String url = "jdbc:clickhouse://172.16.101.14:8123" ;//properties.getProperty("clickhouse.url");
 
         SparkConf sparkConf = new SparkConf().
                 setAppName("SOME APP NAME").
-                setMaster("local[50]").
-                set("spark.driver.maxResultSize", "8g").
-                set("spark.driver.memory", "8g").
-                set("spark.executor.memory", "8g");
+                setMaster("spark://172.16.112.29:7077");
 
         SparkSession spark = SparkSession.
                 builder().
@@ -62,43 +70,64 @@ public class Application {
                 getOrCreate();
 
         SQLContext context = new SQLContext(spark);
+//
+//        StructType schema = DataTypes.
+//                createStructType( new StructField[] {
+//                    new StructField("date", DataTypes.DateType, false, Metadata.empty()),
+//                    new StructField("dateTime", DataTypes.TimestampType, false, Metadata.empty()),
+//                    new StructField("wrt", DataTypes.StringType, true, Metadata.empty()),
+//                    new StructField("stid", DataTypes.StringType, true, Metadata.empty()),
+//                    new StructField("dtid", DataTypes.StringType, true, Metadata.empty()),
+//                    new StructField("part", DataTypes.StringType, true, Metadata.empty()),
+//                    new StructField("component", DataTypes.StringType , true, Metadata.empty()),
+//                    new StructField("aNumber", DataTypes.StringType, true, Metadata.empty()),
+//                    new StructField("a1", DataTypes.StringType, true, Metadata.empty()),
+//                    new StructField("a2", DataTypes.StringType, true, Metadata.empty()),
+//                    new StructField("a3", DataTypes.StringType, true, Metadata.empty()),
+//                    new StructField("a4", DataTypes.StringType, true, Metadata.empty()),
+//                    new StructField("a5", DataTypes.StringType, true, Metadata.empty()),
+//                    new StructField("bNumber", DataTypes.StringType, true, Metadata.empty()),
+//                    new StructField("a6", DataTypes.StringType, true, Metadata.empty()),
+//                    new StructField("a7", DataTypes.StringType, true, Metadata.empty()),
+//                    new StructField("a8", DataTypes.StringType, true, Metadata.empty()),
+//                    new StructField("a9", DataTypes.StringType, true, Metadata.empty()),
+//                });
 
-        StructType schema = DataTypes.
-                createStructType( new StructField[] {
-                    new StructField("date_", DataTypes.DateType, false, Metadata.empty()),
-                    new StructField("dateTime", DataTypes.TimestampType, false, Metadata.empty()),
-                    new StructField("wrt", DataTypes.StringType, true, Metadata.empty()),
-                    new StructField("stid", DataTypes.StringType, true, Metadata.empty()),
-                    new StructField("dtid", DataTypes.StringType, true, Metadata.empty()),
-                    new StructField("part", DataTypes.StringType, true, Metadata.empty()),
-                    new StructField("component", DataTypes.StringType , true, Metadata.empty()),
-                    new StructField("aNumber", DataTypes.StringType, true, Metadata.empty()),
-                    new StructField("a1", DataTypes.StringType, true, Metadata.empty()),
-                    new StructField("a2", DataTypes.StringType, true, Metadata.empty()),
-                    new StructField("a3", DataTypes.StringType, true, Metadata.empty()),
-                    new StructField("a4", DataTypes.StringType, true, Metadata.empty()),
-                    new StructField("a5", DataTypes.StringType, true, Metadata.empty()),
-                    new StructField("bNumber", DataTypes.StringType, true, Metadata.empty()),
-                    new StructField("a6", DataTypes.StringType, true, Metadata.empty()),
-                    new StructField("a7", DataTypes.StringType, true, Metadata.empty()),
-                    new StructField("a8", DataTypes.StringType, true, Metadata.empty()),
-                    new StructField("a9", DataTypes.StringType, true, Metadata.empty()),
-                });
+//        String folder = "dataset/";
+//        String file = "full_export_02-12-2018.csv";
+//
+//        Dataset<Row> ds = context.read().
+//            format("csv").
+//            option("header", "false").
+//            option("footer", "false").
+//            option("mode", "FAILFAST").
+//            option("delimiter", ",").
+//            schema(schema).
+//            load(folder + file).
+//            filter(row -> row.getAs("aNumber") != null).
+//            orderBy("aNumber").
+//            alias("ds");
 
-        String folder = "dataset/";
-        String file = "full_export_02-12-2018.csv";
+        String url = "jdbc:clickhouse://172.16.101.14:8123" ;
 
-        Dataset<Row> ds = context.read().
-            format("csv").
-            option("header", "false").
-            option("footer", "false").
-            option("mode", "FAILFAST").
-            option("delimiter", ",").
-            schema(schema).
-            load(folder + file).
-            filter(row -> row.getAs("aNumber") != null).
-            orderBy("aNumber").
-            alias("ds");
+        StringBuilder schema = new StringBuilder();
+        schema.append("component String, ");
+        schema.append("b_number String");
+
+        Map<String, String> connectionProperties = new HashMap<>();
+        connectionProperties.put("numPartitions", "20");
+        connectionProperties.put("batchsize", "1000");
+        connectionProperties.put("url", url);
+        connectionProperties.put("dbtable", "default.temp");
+        connectionProperties.put("customSchema", schema.toString());
+        connectionProperties.put("user", "default");
+
+        Dataset<Row> ds = spark.read()
+                .format("jdbc")
+                .options(connectionProperties)
+                .load();
+
+        ds.show();
 
         log.info("### total={}", ds.count());
 
@@ -106,10 +135,10 @@ public class Application {
         DateTime period90End = new DateTime().minusMonths(1);
 
         Dataset<Row> outgoingCalls90 = ds.
-                filter("component like '%InitialDP%'").
+                filter(row -> ((String) row.getAs("component")).contains("InitialDP")).
                 filter((FilterFunction<Row>) row ->
-                        ((Date)row.getAs("date_")).compareTo(period90Start.toDate()) > 0 &&
-                            ((Date)row.getAs("date_")).compareTo(period90End.toDate()) < 0);
+                        ((Date)row.getAs("date")).compareTo(period90Start.toDate()) > 0 &&
+                            ((Date)row.getAs("date")).compareTo(period90End.toDate()) < 0);
 
         outgoingCalls90.show();
         log.info("### 90 days count={}", outgoingCalls90.count());
@@ -117,7 +146,7 @@ public class Application {
         DateTime period60End = new DateTime().minusMonths(3);
         Dataset<Row> outgoingCalls60 = outgoingCalls90.
                 filter((FilterFunction<Row>) row ->
-                        ((Date)row.getAs("date_")).compareTo(period60End.toDate()) > 0).
+                        ((Date)row.getAs("date")).compareTo(period60End.toDate()) > 0).
                 alias("outgoingCalls60");
 
         outgoingCalls60.show();
@@ -126,47 +155,47 @@ public class Application {
         DateTime period30End = new DateTime().minusMonths(2);
         Dataset<Row> outgoingCalls30 = outgoingCalls60.
                 filter((FilterFunction<Row>) row ->
-                        ((Date)row.getAs("date_")).compareTo(period30End.toDate()) > 0).
+                        ((Date)row.getAs("date")).compareTo(period30End.toDate()) > 0).
                 alias("outgoingCalls30");
 
         DateTime lastMonthEnd = new DateTime().minusMonths(1);
         Dataset<Row> lastMonth = ds.
                 filter((FilterFunction<Row>) row ->
-                        ((Date)row.getAs("date_")).compareTo(lastMonthEnd.toDate()) > 0).
+                        ((Date)row.getAs("date")).compareTo(lastMonthEnd.toDate()) > 0).
                 alias("lastMonth");
 
         outgoingCalls30.show();
         log.info("### 30 days count={}", outgoingCalls30.count());
 
-        Dataset<Row> result = ds.select("aNumber").distinct().
+        Dataset<Row> result = ds.select("a_number").distinct().
 
                 join(
-                        outgoingCalls30.groupBy("aNumber").count().as("outgoing_calls_30"),
-                        col("outgoingCalls30.aNumber").equalTo(col("ds.aNumber")),
+                        lastMonth.groupBy("a_number").count().as("outgoing_calls_30"),
+                        col("outgoingCalls30.a_number").equalTo(col("ds.a_number")),
                         "leftouter"
                 ).
 
                 join(
-                        outgoingCalls30.groupBy("aNumber").count().as("outgoing_calls_30_upd"),
-                        col("outgoingCalls30.aNumber").equalTo(col("ds.aNumber")),
+                        outgoingCalls30.groupBy("a_number").count().as("outgoing_calls_30_upd"),
+                        col("outgoingCalls30.a_number").equalTo(col("ds.a_number")),
                         "leftouter"
                 ).
                 join(
-                        outgoingCalls60.groupBy("aNumber").count().as("outgoing_calls_60_upd"),
-                        col("outgoingCalls60.aNumber").equalTo(col("ds.aNumber")),
+                        outgoingCalls60.groupBy("a_number").count().as("outgoing_calls_60_upd"),
+                        col("outgoingCalls60.a_number").equalTo(col("ds.a_number")),
                         "leftouter"
                 ).
                 join(
-                        outgoingCalls90.groupBy("aNumber").count().as("outgoing_calls_90_upd"),
-                        col("outgoingCalls90.aNumber").equalTo(col("ds.aNumber")),
+                        outgoingCalls90.groupBy("a_number").count().as("outgoing_calls_90_upd"),
+                        col("outgoingCalls90.a_number").equalTo(col("ds.a_number")),
                         "leftouter"
                 ).
                 select(
-                        col("ds.aNumber"),
-                        col("outgoingCalls30.count").as("outgoing_calls_30"),
-                        col("outgoingCalls30.count").as("outgoing_calls_30_upd"),
-                        col("outgoingCalls60.count").as("outgoing_calls_60_upd"),
-                        col("outgoingCalls90.count").as("outgoing_calls_90_upd")
+                        col("ds.a_number"),
+                        col("outgoing_calls_30"),
+                        col("outgoing_calls_30_upd"),
+                        col("outgoing_calls_60_upd"),
+                        col("outgoing_calls_90_upd")
                 );
 
         result.show();
@@ -179,7 +208,7 @@ public class Application {
                 format("com.databricks.spark.csv").
                 option("header", "true").
                 option("delimiter", ",").
-                save("done/" + file.replace(".csv", "_done") + ".csv");
+                save("done/done.csv");
 
         spark.stop();
     }
